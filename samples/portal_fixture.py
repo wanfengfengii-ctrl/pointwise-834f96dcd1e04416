@@ -1,8 +1,11 @@
 from dataclasses import dataclass, field
+import json
+from secrets import token_hex
 
 from evidence.frames import RawFrame
 from evidence.intervals import Interval, validate_interval
-from evidence.receipts import CoverageReceipt
+from evidence.receipts import CoverageReceipt, SourceReceipt
+from evidence.source_proofs import SourceAnchor, build_source_claim, canonical_json
 from registry.channels import require_channels, require_name
 from sessions.portal import Delivery, Registration
 from sessions.runs import validate_position
@@ -25,6 +28,7 @@ class _Observer:
     matching: dict[int, tuple[str, int]] = field(default_factory=dict)
     sent: set[int] = field(default_factory=set)
     deliveries: list[Delivery] = field(default_factory=list)
+    source_claims: dict[tuple[int, int], tuple[SourceAnchor, dict]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -136,6 +140,51 @@ class ScriptedPortal:
         return self.append_event(handle, CoverageReceipt(
             receipt_id, interval, state.condition, handle, f'{handle}/receipt/{receipt_id}',
         ))
+
+    def emit_source_receipt(self, observer, start, end):
+        """Generate the whole-shift source receipt from the real source records.
+
+        The claim is fixed once generated and is independent of the delivery
+        stream, so transport omissions or edited delivery events cannot change
+        the anchor or the opening material.
+        """
+        self._require_online()
+        state = self._observers[observer]
+        interval = validate_interval(Interval(start, end), allow_empty=False)
+        if start < state.registration.first_seq or end > self.next_seq:
+            raise ValueError('observation cannot certify that interval')
+        key = (start, end)
+        claim = state.source_claims.get(key)
+        if claim is None:
+            frames = tuple(
+                RawFrame(seq, channel, value, observer, f'{self.station}/source/{seq}')
+                for seq, (channel, value) in sorted(state.matching.items())
+                if start <= seq < end
+            )
+            receipt_id = f'source-{start}-{end}'
+            salting = {seq: token_hex(16) for seq in range(start, end)}
+            anchor, material = build_source_claim(
+                station=self.station, observer=observer, condition=state.condition,
+                start=start, end=end, receipt_id=receipt_id, frames=frames, salting=salting,
+            )
+            claim = (anchor, material)
+            state.source_claims[key] = claim
+        anchor, material = claim
+        coverage = CoverageReceipt(
+            anchor.receipt_id, interval, state.condition, observer,
+            f'{observer}/source-receipt/{anchor.receipt_id}',
+        )
+        return self.append_event(observer, SourceReceipt(coverage, material))
+
+    def source_anchor(self, observer, start, end):
+        """Trusted entry: read the fixed anchor independently of deliveries."""
+        self._require_online()
+        state = self._observers[observer]
+        try:
+            anchor, _ = state.source_claims[(start, end)]
+        except KeyError as exc:
+            raise KeyError(f'no source anchor for {observer!r} [{start}, {end})') from exc
+        return json.loads(canonical_json(anchor.to_data()))
 
     def read_history(self, station, condition, start, end):
         self._require_online()

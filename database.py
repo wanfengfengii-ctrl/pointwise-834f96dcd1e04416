@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS runs (
     status TEXT NOT NULL DEFAULT 'active',
     sealed_end TEXT,
     result_id TEXT REFERENCES results(result_id),
+    source_end TEXT,
     CHECK ((status = 'active' AND sealed_end IS NULL AND result_id IS NULL)
         OR (status = 'sealed' AND sealed_end IS NOT NULL AND result_id IS NOT NULL))
 );
@@ -52,6 +53,16 @@ CREATE TABLE IF NOT EXISTS receipts (
     hi TEXT NOT NULL,
     condition TEXT NOT NULL,
     provenance TEXT NOT NULL,
+    PRIMARY KEY (run_id, observer, receipt_id)
+);
+CREATE TABLE IF NOT EXISTS source_receipts (
+    run_id INTEGER NOT NULL REFERENCES runs(run_id),
+    observer TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    lo TEXT NOT NULL,
+    hi TEXT NOT NULL,
+    condition TEXT NOT NULL,
+    material TEXT NOT NULL,
     PRIMARY KEY (run_id, observer, receipt_id)
 );
 CREATE TABLE IF NOT EXISTS results (

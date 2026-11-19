@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 
 from database import transaction
-from evidence.intake import CaptureContext, IntakeOutcome, accept_event
+from evidence.intake import (
+    CaptureContext, IntakeOutcome, accept_event, accept_source_receipt,
+)
+from evidence.receipts import SourceReceipt
 from sessions.portal import check_delivery
 from sessions.runs import RunStatus, RunStore
 
@@ -28,7 +31,19 @@ def step(db, portal, run_id):
             if current.status is not RunStatus.ACTIVE or current.position != position:
                 raise RuntimeError('run changed during portal poll')
             check_delivery(delivery, current.observer, current.condition, position)
-            outcome = accept_event(db, CaptureContext.from_run(current), delivery.event)
+            context = CaptureContext.from_run(current)
+            event = delivery.event
+            if isinstance(event, SourceReceipt):
+                try:
+                    trusted_anchor = portal.source_anchor(
+                        current.observer, event.coverage.interval.start,
+                        event.coverage.interval.end,
+                    )
+                except (KeyError, OSError) as exc:
+                    raise ValueError('no trusted portal anchor for the source receipt') from exc
+                outcome = accept_source_receipt(db, context, event, trusted_anchor)
+            else:
+                outcome = accept_event(db, context, event)
             runs.advance(run_id, position, delivery.position)
         position = delivery.position
         acknowledged += 1

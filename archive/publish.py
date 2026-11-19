@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from archive.artifacts import ArchiveArtifact, artifact_digest, encode_artifact
-from archive.eligibility import assess_seal
+from archive.eligibility import assess_seal, assess_source_seal
 from archive.results import ResultStore, StoredResult, result_id_for
 from database import transaction
 from evidence.intervals import Interval, validate_interval
@@ -21,6 +21,8 @@ class SealOutcome:
 def seal(db, run_id, end, *, portal):
     with transaction(db, write=True):
         run = RunStore(db).load(run_id)
+        if run.source_end is not None and end != run.source_end:
+            raise ValueError('source-proof shifts only accept the bound cutoff')
         validate_interval(Interval(run.start_seq, end))
         results = ResultStore(db)
         existing = sealed_result_for(run, end)
@@ -29,7 +31,10 @@ def seal(db, run_id, end, *, portal):
             if record is None or record.result_id != existing or record.end != end:
                 raise ValueError('published result is inconsistent with the sealed run')
             return SealOutcome(existing)
-        decision = assess_seal(db, run, end)
+        if run.source_end is None:
+            decision = assess_seal(db, run, end)
+        else:
+            decision = assess_source_seal(db, run)
         selection = decision.selection
         if selection is None:
             return SealOutcome(None, decision.missing)
@@ -38,7 +43,8 @@ def seal(db, run_id, end, *, portal):
         result_id = result_id_for(run_id)
         artifact = ArchiveArtifact(
             result_id, run_id, run.station, selection.interval, run.condition, run.observer,
-            run.first_seq, revision, selection.frames, selection.receipts, selection.no_match, quality,
+            run.first_seq, revision, selection.frames, selection.receipts, selection.no_match,
+            quality, selection.source_proof,
         )
         payload = encode_artifact(artifact)
         results.insert(StoredResult(result_id, run_id, end, payload, artifact_digest(payload)))

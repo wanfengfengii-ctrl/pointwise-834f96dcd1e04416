@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from evidence.frames import RawFrame
-from evidence.receipts import CoverageReceipt
+from evidence.receipts import CoverageReceipt, SourceReceipt
 from registry.channels import require_name
 from sessions.runs import validate_position
 
@@ -19,7 +19,7 @@ class Delivery:
     observer: str
     condition: tuple[str, ...]
     position: int
-    event: RawFrame | CoverageReceipt
+    event: RawFrame | CoverageReceipt | SourceReceipt
 
 
 class ObservationPortal(Protocol):
@@ -30,6 +30,9 @@ class ObservationPortal(Protocol):
         ...
 
     def release(self, observer: str) -> None:
+        ...
+
+    def source_anchor(self, observer: str, start: int, end: int) -> dict:
         ...
 
 

@@ -29,6 +29,18 @@ python3 -B -m unittest discover -s tests
 
 原帧重投按源序号和原始内容比较，保留首次出处。凭证包含条件、观察句柄、半开区间和出处。只有凭证证明的范围才用于确认无匹配。校准系数和限值接受整数、有理数字符串或 `Fraction`，浮点输入会被拒绝。换算按 `原值 × 比例 + 偏置`，限值等值算在限内，通道均值包含全部有效读数，零样本均值为空。
 
+## 源凭证模式（SOURCE_PROOFS）
+
+在 V1 之外新增全班源凭证模式，原入口、旧成果和全部原回归保持可用。契约见 `SOURCE_PROOFS.md`，交接说明见 `SOURCE_PROOFS_HANDOFF.md`。
+
+- `sessions.opening.start(..., source_end=end)` 固定半开区间 `[start_seq, source_end)`；省略 `source_end` 时完全沿用 V1。
+- `evidence.receipts.SourceReceipt(coverage, material)` 包装原 `CoverageReceipt` 和可 JSON 往返的证据材料。`ScriptedPortal.emit_source_receipt(observer, start, end)` 从门户实际源记录生成全班凭证并经 `Delivery` 排队；`ScriptedPortal.source_anchor(observer, start, end)` 是独立可信入口，返回含 `station`、`observer`、`condition`、`range`、`receipt_id`、非空 `commitment` 的锚点。
+- 接纳时以独立另存的可信锚点核齐实收原帧：缺帧、增帧、改值、错绑、无锚点或普通 V1 凭证都在 `step` 中抛 `ValueError`，不推进交付位置，已提交前缀和原帧保留。
+- 源凭证模式只接受开班绑定的截止点封存；凭证、锚点、隐藏承诺与成果同次提交，失败保全先前状态。
+- `archive.export_source_segment(db, result_id, start, end)` 导出授权非空子区间证据包；可读的 V1 成果经此入口返回 `None`，未知成果抛 `KeyError`，损坏证据抛 `StoredEvidenceError`，非法区间抛 `ValueError`。
+- `archive.verify_source_segment(bundle, trusted_anchor, start, end)` 无门户和数据库参数，凭另存可信锚点离线核验身份、完整匹配和空位，返回 `(frames, no_match)`；区间外只携带盐化承诺，不泄露原值、开启材料或无盐指纹。
+- 运行演示：`python3 -B -m samples.source_proofs`（漏送拒绝、完整封存、停源重开领包、断库复核，并保留 V1 事故对照）。
+
 ## 样例
 
 样例在临时库中初始化测站并登记人工修订 R1。门户先发盐度 3 号帧，随后发 1 号帧及重投。封存先返回 [0,2) 缺口，收到凭证后完成。停源重开可领取 1 和 4/3 g/L，均值 7/6 g/L，无匹配区间为 [0,1)、[2,3)、[4,5)。另一班次仅观察盐度，门户提供覆盖两条浊度源记录的盐度空凭证，离线统计显示零条盐度读数和空均值。

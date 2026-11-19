@@ -28,6 +28,7 @@ class ArchiveArtifact:
     receipts: tuple[CoverageReceipt, ...]
     no_match: tuple[Interval, ...]
     quality: QualityReport
+    source_proof: dict | None = None
 
 
 def _quality_data(report):
@@ -88,6 +89,8 @@ def encode_artifact(artifact):
         'no_match': [asdict(interval) for interval in artifact.no_match],
         'quality': _quality_data(artifact.quality),
     }
+    if artifact.source_proof is not None:
+        data['source_proof'] = artifact.source_proof
     return json.dumps(data, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
@@ -99,12 +102,16 @@ def decode_artifact(payload):
         item['receipt_id'], Interval(**item['interval']), tuple(item['condition']),
         item['observer'], item['provenance'],
     ) for item in data['receipts'])
+    source_proof = data.get('source_proof')
+    if source_proof is not None and type(source_proof) is not dict:
+        raise ValueError('source proof must be an object')
     return ArchiveArtifact(
         data['result_id'], data['run_id'], data['station'], Interval(**data['interval']),
         tuple(data['condition']), data['observer'], data['first_seq'],
         StationRevision.from_data(data['revision']),
         tuple(RawFrame(**item) for item in data['frames']), receipts,
         tuple(Interval(**item) for item in data['no_match']), _read_quality(data['quality']),
+        source_proof,
     )
 
 

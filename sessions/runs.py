@@ -24,6 +24,7 @@ class Run:
     status: RunStatus
     sealed_end: int | None
     result_id: str | None
+    source_end: int | None = None
 
 
 def validate_position(position, label='source sequence'):
@@ -36,11 +37,13 @@ class RunStore:
     def __init__(self, db):
         self.db = db
 
-    def insert(self, station, revision_id, start_seq, condition, observer, first_seq):
+    def insert(self, station, revision_id, start_seq, condition, observer, first_seq,
+               source_end=None):
         cursor = self.db.execute(
-            'INSERT INTO runs(station, revision_id, start_seq, condition, observer, first_seq) '
-            'VALUES (?, ?, ?, ?, ?, ?)',
-            (station, revision_id, str(start_seq), json.dumps(condition), observer, str(first_seq)),
+            'INSERT INTO runs(station, revision_id, start_seq, condition, observer, first_seq, '
+            'source_end) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (station, revision_id, str(start_seq), json.dumps(condition), observer,
+             str(first_seq), None if source_end is None else str(source_end)),
         )
         return cursor.lastrowid
 
@@ -50,9 +53,13 @@ class RunStore:
         row = self.db.execute('SELECT * FROM runs WHERE run_id = ?', (str(run_id),)).fetchone()
         if row is None:
             raise KeyError(run_id)
+        keys = row.keys()
         condition = json.loads(row['condition'])
         if type(condition) is not list or tuple(condition) != normalize_channels(condition):
             raise ValueError('invalid stored run condition')
+        source_end = None
+        if 'source_end' in keys and row['source_end'] is not None:
+            source_end = validate_position(read_integer(row['source_end']), 'source end')
         return Run(
             run_id, require_name(row['station'], 'station'), row['revision_id'],
             validate_position(read_integer(row['start_seq'])), tuple(condition),
@@ -60,7 +67,7 @@ class RunStore:
             validate_position(read_integer(row['position']), 'delivery position'),
             RunStatus(row['status']),
             None if row['sealed_end'] is None else validate_position(read_integer(row['sealed_end'])),
-            row['result_id'],
+            row['result_id'], source_end,
         )
 
     def advance(self, run_id, previous, position):
